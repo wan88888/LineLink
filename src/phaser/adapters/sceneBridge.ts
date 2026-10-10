@@ -9,6 +9,16 @@ export interface SceneHandlers {
 }
 
 export class SceneBridge {
+  private resolveReady!: () => void;
+  ready = new Promise<void>((resolve) => { this.resolveReady = resolve; });
+
+  resetRuntime(): void {
+    this.sceneHandlers = null;
+    this.queuedLevel = null;
+    this.queuedReset = false;
+    this.queuedUndo = false;
+    this.ready = new Promise<void>((resolve) => { this.resolveReady = resolve; });
+  }
   private sceneHandlers: SceneHandlers | null = null;
   private queuedLevel: LevelDefinition | null = null;
   private queuedReset = false;
@@ -19,6 +29,7 @@ export class SceneBridge {
 
   attachSceneHandlers(handlers: SceneHandlers): void {
     this.sceneHandlers = handlers;
+    this.resolveReady();
 
     if (this.queuedLevel) {
       handlers.loadLevel(this.queuedLevel);

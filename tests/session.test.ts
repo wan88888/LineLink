@@ -64,3 +64,22 @@ describe('edgeKey', () => {
     expect(edgeKey(a, b)).toBe(edgeKey(b, a));
   });
 });
+
+it('counts a fresh attempt after undoing back to an empty path', () => {
+  const s = new OneStrokeSession(triangle);
+  s.extend(triangle.nodes[0]);
+  s.extend(triangle.nodes[1]);
+  s.undo();
+  s.undo();
+  s.extend(triangle.nodes[2]);
+  expect(s.snapshot().attempts).toBe(2);
+});
+
+it('partial undo remains in the same attempt and solved sessions reject drawing', () => {
+  const s = new OneStrokeSession(triangle);
+  s.extend(triangle.nodes[0]); s.extend(triangle.nodes[1]); s.undo();
+  s.extend(triangle.nodes[1]); s.extend(triangle.nodes[2]); s.extend(triangle.nodes[0]);
+  expect(s.snapshot().attempts).toBe(1);
+  expect(s.extend(triangle.nodes[1]).ok).toBe(false);
+  expect(s.snapshot().solved).toBe(true);
+});

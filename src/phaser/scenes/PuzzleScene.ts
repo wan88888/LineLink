@@ -51,12 +51,6 @@ export class PuzzleScene extends Phaser.Scene {
     this.pathGraphics = this.add.graphics();
     this.previewGraphics = this.add.graphics();
 
-    this.bridge.attachSceneHandlers({
-      loadLevel: (level) => this.loadLevel(level),
-      reset: () => this.resetLevel(),
-      undo: () => this.undoStep(),
-    });
-
     this.scale.on('resize', () => {
       if (this.level) {
         this.renderLevel();
@@ -66,8 +60,15 @@ export class PuzzleScene extends Phaser.Scene {
     this.input.on('pointerdown', this.handlePointerDown, this);
     this.input.on('pointermove', this.handlePointerMove, this);
     this.input.on('pointerup', this.handlePointerUp, this);
+    this.input.on('pointerupoutside', this.handlePointerUp, this);
+    this.game.events.on('blur', this.handlePointerUp, this);
 
     this.renderIdleState();
+    this.bridge.attachSceneHandlers({
+      loadLevel: (level) => this.loadLevel(level),
+      reset: () => this.resetLevel(),
+      undo: () => this.undoStep(),
+    });
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
@@ -76,21 +77,17 @@ export class PuzzleScene extends Phaser.Scene {
     }
 
     const snapshot = this.session.snapshot();
-    if (snapshot.path.length > 0) {
-      const last = snapshot.path[snapshot.path.length - 1];
-      const lastPos = this.pointToPosition(last);
-      const distanceToLast = Phaser.Math.Distance.Between(pointer.x, pointer.y, lastPos.x, lastPos.y);
-      const nearest = this.pointFromPointer(pointer);
-      const isOnLast = nearest && nearest.row === last.row && nearest.col === last.col;
-      if (!isOnLast && distanceToLast > (this.layout?.tokenRadius ?? 0) * 2) {
-        this.session.reset();
-        this.updateRenderingFromSession(this.session.snapshot());
-        this.bridge.emitSnapshot(this.session.snapshot());
-      }
+    if (snapshot.solved) return;
+    const nearest = this.pointFromPointer(pointer);
+    if (!nearest) return;
+    const last = snapshot.path.at(-1);
+    if (last && pointKey(nearest) !== pointKey(last)) {
+      this.emitThrottledToast('请从亮色圆环处继续，或按重置重新开始。');
+      return;
     }
 
     this.drawSessionActive = true;
-    this.tryExtendPath(pointer);
+    this.tryExtendPath(pointer, nearest);
     this.updatePreviewLine(pointer);
   }
 
@@ -119,7 +116,7 @@ export class PuzzleScene extends Phaser.Scene {
     this.previewGraphics.clear();
     const snapshot = this.session.snapshot();
     const last = snapshot.path[snapshot.path.length - 1];
-    if (!last) {
+    if (!last || snapshot.solved) {
       return;
     }
     const start = this.pointToPosition(last);
@@ -128,12 +125,12 @@ export class PuzzleScene extends Phaser.Scene {
     this.previewGraphics.lineBetween(start.x, start.y, pointer.x, pointer.y);
   }
 
-  private tryExtendPath(pointer: Phaser.Input.Pointer): void {
+  private tryExtendPath(pointer: Phaser.Input.Pointer, selectedPoint?: GridPoint): void {
     if (!this.level || !this.session || !this.layout) {
       return;
     }
 
-    const point = this.pointFromPointer(pointer);
+    const point = selectedPoint ?? this.pointFromPointer(pointer);
     if (!point) {
       return;
     }
@@ -158,6 +155,7 @@ export class PuzzleScene extends Phaser.Scene {
     this.bridge.emitSnapshot(nextSnapshot);
 
     if (nextSnapshot.solved) {
+      this.handlePointerUp();
       this.pathSolvedFx();
       this.bridge.emitToast('过关！一笔走完所有线条。', 'success');
       this.bridge.emitSolved(nextSnapshot);
@@ -176,6 +174,9 @@ export class PuzzleScene extends Phaser.Scene {
 
   private loadLevel(level: LevelDefinition): void {
     this.level = level;
+    this.drawSessionActive = false;
+    this.tweens.killTweensOf(this.pathGraphics);
+    this.pathGraphics.setAlpha(1);
     this.session = new OneStrokeSession(level);
     this.activeCells = new Set<string>();
     this.neighborMap = new Map<string, GridPoint[]>();
@@ -209,6 +210,7 @@ export class PuzzleScene extends Phaser.Scene {
       return;
     }
 
+    this.handlePointerUp();
     this.session.reset();
     const snapshot = this.session.snapshot();
     this.updateRenderingFromSession(snapshot);
@@ -220,6 +222,7 @@ export class PuzzleScene extends Phaser.Scene {
       return;
     }
 
+    this.handlePointerUp();
     this.session.undo();
     const snapshot = this.session.snapshot();
     this.updateRenderingFromSession(snapshot);
@@ -252,7 +255,7 @@ export class PuzzleScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const subtitle = this.add
-      .text(this.scale.width / 2, this.scale.height * 0.47, '一笔连通全部节点', {
+      .text(this.scale.width / 2, this.scale.height * 0.47, '每条线走一次，节点可以重复', {
         fontFamily: '"Noto Sans SC", "Trebuchet MS", sans-serif',
         fontSize: `${Math.round(this.scale.width * 0.037)}px`,
         color: '#3a7468',
@@ -349,10 +352,14 @@ export class PuzzleScene extends Phaser.Scene {
     }
 
     const visited = new Set(path.map((point) => pointKey(point)));
+    const oddNodes = this.level!.nodes.filter(n => (this.neighborMap.get(pointKey(n))?.length ?? 0) % 2 === 1);
     this.tokenVisuals.forEach((visual, key) => {
+      const isEnd = path.length > 0 && key === pointKey(path.at(-1)!);
+      const isStartHint = path.length === 0 && (oddNodes.length === 0 || oddNodes.some(n => pointKey(n) === key));
+      visual.circle.setStrokeStyle(isEnd || isStartHint ? 3 : 0, isEnd ? 0xffb545 : 0xd8a451);
       if (visited.has(key)) {
         visual.circle.setFillStyle(0x25a16a, 1);
-        this.pulseNode(visual.circle);
+        if (key === pointKey(path.at(-1)!)) this.pulseNode(visual.circle);
       } else {
         visual.circle.setFillStyle(0x2f7d6b, 1);
       }
@@ -360,6 +367,7 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private pulseNode(circle: Phaser.GameObjects.Arc): void {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     if ((circle as unknown as { __pulsing?: boolean }).__pulsing) return;
     (circle as unknown as { __pulsing?: boolean }).__pulsing = true;
     this.tweens.add({
@@ -376,6 +384,7 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private pathSolvedFx(): void {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     this.tweens.add({
       targets: this.pathGraphics,
       alpha: 0.25,
@@ -391,7 +400,10 @@ export class PuzzleScene extends Phaser.Scene {
       return null;
     }
 
-    const hitRadius = Math.max(this.layout.tokenRadius * 2.4, this.layout.cellSize * 0.45);
+    // Keep drag targets close to the visible dots so nearby chords do not snap sideways.
+    const hitRadius = this.drawSessionActive
+      ? this.layout.tokenRadius * 1.35
+      : Math.max(24, this.layout.tokenRadius * 2.4);
     let best: GridPoint | null = null;
     let bestDist = Infinity;
 

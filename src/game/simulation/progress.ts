@@ -1,8 +1,9 @@
 import type { LevelRecord, ProgressState } from './types';
 
-const STORAGE_KEY = 'linelink-progress-v2';
+const STORAGE_KEY = 'linelink-progress-v3';
+const PREVIOUS_KEY = 'linelink-progress-v2';
 const LEGACY_KEY_V1 = 'linelink-progress-v1';
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 function emptyRecord(): LevelRecord {
   return { solved: false, bestAttempts: 0, stars: 0 };
@@ -17,12 +18,13 @@ function sanitize(progress: ProgressState, levelCount: number): ProgressState {
       records[id] = {
         solved: true,
         bestAttempts: Math.max(1, Math.floor(r.bestAttempts || 1)),
-        stars: (r.stars && r.stars >= 1 && r.stars <= 3 ? r.stars : 1) as 1 | 2 | 3,
+        stars: (Number.isInteger(r.stars) && r.stars >= 1 && r.stars <= 3 ? r.stars : 1) as 1 | 2 | 3,
       };
       if (id > maxSolved) maxSolved = id;
     }
   }
-  const unlocked = Math.max(1, Math.min(levelCount, Math.max(progress.unlockedLevel, maxSolved + 1)));
+  const value = Number.isFinite(progress.unlockedLevel) ? Math.floor(progress.unlockedLevel) : 1;
+  const unlocked = Math.max(1, Math.min(levelCount, Math.max(value, maxSolved + 1)));
   return { version: CURRENT_VERSION, unlockedLevel: unlocked, records };
 }
 
@@ -66,12 +68,18 @@ export function loadProgress(levelCount: number): ProgressState {
         );
       }
     }
+    // The new puzzles are different. Keep unlocked access, not unrelated old stars.
+    const previous = localStorage.getItem(PREVIOUS_KEY);
+    if (previous) {
+      const old = JSON.parse(previous) as Partial<ProgressState>;
+      const migrated = sanitize({ ...fallback, unlockedLevel: old.unlockedLevel ?? 1 }, levelCount);
+      return saveProgress(migrated, levelCount);
+    }
     const legacy = localStorage.getItem(LEGACY_KEY_V1);
     if (legacy) {
       const migrated = migrateV1(legacy, levelCount);
       if (migrated) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-        return migrated;
+        return saveProgress({ ...migrated, records: {} }, levelCount);
       }
     }
     return fallback;

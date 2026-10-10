@@ -41,9 +41,6 @@ export class OneStrokeSession {
   }
 
   reset(): void {
-    if (this.path.length > 0 && !this.solved) {
-      // leaving an unfinished attempt does not count as a new one; next draw will
-    }
     this.path = [];
     this.usedEdges.length = 0;
     this.usedEdgeSet.clear();
@@ -66,9 +63,11 @@ export class OneStrokeSession {
       }
     }
     this.solved = false;
+    if (this.path.length === 0) this.countedAttempt = false;
   }
 
   extend(point: GridPoint): AttemptStatus {
+    if (this.solved) return { ok: false };
     if (!this.isNode(point)) {
       return { ok: false, reason: '只能走到图上的节点。' };
     }

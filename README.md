@@ -1,158 +1,61 @@
 # LineLink
 
-一笔画（One-Stroke / Eulerian Path）益智小游戏。玩家需要从任意节点出发，一笔连续地经过图中每一条边恰好一次，即可过关。
+手机优先的图形一笔画游戏。每条边只能走一次，节点可以重复；没有圆点的交叉处不能转弯。松手后从路径末端继续。
 
-- 纯前端：Vite + TypeScript + Phaser 3
-- 48 关：16 个经过一笔画可解性验证的形状 × 3 个镜像变体
-- 触控优先：拖拽作画，手机端布局自适应
-- 无外部资源音效：WebAudio 合成步进 / 通关提示音
-- 三星评级：按尝试次数给出 1–3 星，支持 v1 → v2 的本地进度迁移
+## 开发
 
-## 快速开始
-
-```bash
+```sh
 npm install
-npm run dev          # 启动开发服务器 http://localhost:5725
-npm run build        # 生产构建到 dist/
-npm run preview      # 预览生产包
-npm run typecheck    # tsc --noEmit
-npm test             # vitest
-npm run lint         # eslint
+npm run dev                  # 默认 http://localhost:5725
+npm run build
+npm run lint
+npm test -- --run
 ```
 
-Node ≥ 20 推荐。
+Vite + TypeScript + Phaser 3。首页不加载 Phaser，进入关卡后才加载引擎；初始化请求共享同一 Promise，并等待场景就绪。失败提供重试和返回选关入口。ResizeObserver 统一同步画布尺寸，横竖屏切换保留正在画的路径。
 
-## 玩法
+## 关卡与评分
 
-1. 在主页点击「开始」，系统自动定位到你的下一个未通关关卡。
-2. 进入关卡后，从任意节点按住手指拖拽到相邻节点，即可连线。
-3. 继续沿着已经画出的路径末端拖拽，直到所有边都被覆盖。
-4. 重复经过的节点允许，重复经过的**边不允许**。
-5. 所有边覆盖完成即通关。尝试次数越少，星级越高：
-   - 1 次通关 → 3 星
-   - ≤ 3 次通关 → 2 星
-   - 其他 → 1 星
+- 48 个确定生成的可解盘面，排除旋转、镜像重复。
+- 前三关介绍基础操作，后续按分岔度、边数及起点限制的综合分值递增；四个章节各 12 关。
+- 测试独立构造欧拉路径，验证所有关卡可以通过实际会话规则完成。
+- 金色圆环提示合法起点，绘制后标出当前路径末端。
+- 同一轮挑战首次完成得 3 星，2–3 次得 2 星，4 次起得 1 星。
+- 部分撤销是免费修正；全部撤销或重置后重画，计为新尝试。
+- 通关结算显示本次星级和最佳记录，可开始新一轮挑战或进入下一关。
+- 首页支持直接选关、继续挑战、玩法帮助和音效设置。
 
-控制栏：
-- `↶` 撤销最近一条边
-- `↺` 重置当前关
-- 左上箭头：返回关卡列表
-- 右下箭头：下一关（优先跳到下一个未通关）
+难度分值用于排序，不代表经过真人测试的绝对难度；后续可以依据实际玩家数据调整。
 
-## 目录结构
+## 每日奖励
 
-```
-index.html
-vite.config.ts          # 将 phaser 拆成独立 chunk，首屏只加载 ~18kB
-tsconfig.json
-.eslintrc.json
-.github/workflows/ci.yml
-src/
-  main.ts               # 入口：DOM 外壳 + 动态加载 Phaser
-  style.css
-  game/
-    input/actions.ts    # 输入动作定义
-    simulation/
-      types.ts          # LevelDefinition / SessionSnapshot / ProgressState 等
-      shapes.ts         # 16 个 Euler 可解形状模板
-      levels.ts         # 形状 × 镜像 → 48 关，含 hasEulerPath 校验
-      session.ts        # OneStrokeSession：边级游戏状态机
-      progress.ts       # localStorage 持久化 + v1→v2 迁移 + 星级
-      expression.ts     # 预留接口
-  phaser/
-    adapters/sceneBridge.ts
-    scenes/
-      BootScene.ts
-      PuzzleScene.ts    # 渲染节点、边、路径，处理拖拽交互
-  ui/
-    mobileShell.ts      # 主页 / 关卡页 / 控制栏 DOM 外壳
-    sfx.ts              # WebAudio 合成音效（无外部资源）
-tests/
-  levels.test.ts        # 关卡目录与 Euler 判定
-  session.test.ts       # 一笔画边遍历、撤销、尝试次数、edgeKey
+首页提供 7 天循环签到，依次奖励 10、15、20、25、30、40、60 墨滴。按设备本地日期，每日 0 点刷新；连续签到第 8 天开始新一轮，漏签从第 1 天重计，不扣已有墨滴。已领取状态、余额和配色解锁记录存入独立的 `linelink-daily-v1`，不会改变关卡星级。
+
+设置中可用 100 墨滴永久解锁「日落琥珀」首页配色，解锁后可与免费配色「薄荷晨光」自由切换。支持同日防重复领取、跨日刷新与多标签页同步；支持 Web Locks 的浏览器还会串行处理多标签页同时领取。存储不可用时会提示奖励仅在当前页面会话保留。
+
+这是本地单机奖励，不提供服务端校时、账号同步或防篡改；清除浏览器数据会清除奖励记录。
+
+## 存档
+
+新目录使用 `linelink-progress-v3`。首次读取旧 v2/v1 存档时继承已解锁范围，旧存档保留原样。由于关卡内容已更换，新盘面星级从零记录，避免把旧题成绩套用到新题。存储不可用时仍能在当前会话游玩。
+
+音效开关使用 `linelink-sound`，首次教程状态使用 `linelink-help-seen`。动画跟随系统 `prefers-reduced-motion`。
+
+## 验证
+
+`tests/` 覆盖关卡去重、难度排序、全部关卡求解、路径规则、尝试次数、异步初始化共享及失败重试、存档恢复与迁移。
+
+`scripts/smoke.cjs` 使用独立 Playwright 浏览器验证首页、选关、静音持久化、初次加载、误点空白、缩放后继续绘制、结算、下一关、重新进入、进度恢复、横屏、加载失败重试、加载中返回再进入，以及最后一关密集图形的绘制和全部通关结算。需要环境已安装 Playwright 和 Chromium，不读取个人浏览器数据。
+
+```sh
+# 另一个终端启动测试服务
+npm run dev -- --host 127.0.0.1 --port 5726 --strictPort
+# Playwright 已可通过 require('playwright') 加载时
+node scripts/smoke.cjs
+# 使用共享安装时，指定其模块目录
+PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts/smoke.cjs
 ```
 
-## 核心概念
+通过 `TEST_URL` 可覆盖默认测试地址 `http://127.0.0.1:5726`。截图写入系统临时目录。
 
-### Eulerian Path（欧拉路径）
-
-对于无向连通图 $G$，存在经过每条边恰好一次的路径当且仅当：
-
-- 图是连通的（仅考虑非孤立节点），且
-- 奇度数节点个数为 0（欧拉回路）或 2（欧拉路径，必须从一个奇点出发）
-
-`hasEulerPath()` 使用度数奇偶统计 + BFS 连通性检查在关卡生成时断言所有 shape 都是可解的。若某个 shape 失败，`createLevelCatalog()` 会抛错，从根源上阻止出现"无解关卡"。
-
-### 会话状态
-
-`OneStrokeSession` 维护：
-
-- `path: GridPoint[]` — 节点顺序列表
-- `usedEdges: string[]` / `usedEdgeSet: Set<string>` — 已覆盖边（无向，规范化 key）
-- `attempts` — 每次从空路径开始算作一次尝试
-- `solved` — 当 `usedEdges.size === totalEdges` 时置 true
-
-`edgeKey(a, b)` 强制升序排序两个端点的 `row/col`，确保无向唯一。
-
-### 进度持久化
-
-localStorage key：`linelink-progress-v2`。加载时：
-
-1. 读取 v2，若存在直接反序列化。
-2. 否则尝试读取 v1 并迁移：所有已解关卡按 1 星导入。
-3. 最差情况返回全新的 ProgressState，仅解锁第 1 关。
-
-`recordSolved(progress, id, attempts, levelCount)` 以 attempts 计算本次星级，与历史 `bestAttempts` 比较后取最佳，并解锁下一关。
-
-## 测试
-
-```
-tests/levels.test.ts
-  ✓ 关卡目录生成 48 关，ID 递增
-  ✓ 覆盖全部 4 个 tier
-  ✓ hasEulerPath 接受三角形
-  ✓ hasEulerPath 拒绝 4 奇点的 W4 轮图
-
-tests/session.test.ts
-  ✓ 三角形 3 条边后通关
-  ✓ 拒绝重复走同一条边
-  ✓ undo 移除最近一条边
-  ✓ 每次空路径上的第一步增加 attempts
-  ✓ edgeKey 无向对称
-```
-
-运行：`npm test` 或 `npx vitest run`。
-
-## 构建产物
-
-`vite build` 生成的典型 chunk：
-
-| 文件 | 说明 | 大小 (gzip) |
-| --- | --- | --- |
-| `index-*.js` | 主入口 + DOM 外壳 | ~6 kB |
-| `phaser-*.js` | 懒加载的 Phaser 运行时 | ~340 kB |
-| `PuzzleScene-*.js` | 懒加载的关卡场景 | ~3 kB |
-| `index-*.css` | 全部样式 | ~3 kB |
-
-进入关卡时才会动态 `import('phaser')` + `import('./phaser/scenes/PuzzleScene')`，主页几乎无 Phaser 负担。
-
-## CI
-
-`.github/workflows/ci.yml` 在 push / PR 时执行：
-
-1. `npm ci`
-2. `npm run typecheck`
-3. `npm test -- --run`
-4. `npm run build`
-
-## 可拓展方向
-
-- PWA（需图标与 manifest）
-- 真实音频资源（目前全部合成）
-- i18n（中英切换）
-- DOM 模板库 / `GameController` 抽象
-- 更多形状与等级
-
-## License
-
-本项目目前未添加许可证，默认保留所有权利。如需开源请在 `package.json` / `LICENSE` 中声明。
+使用相同环境运行 `node scripts/rewards-smoke.cjs`，可额外验证 SVG 齿轮、四种屏幕尺寸、并发签到、刷新保留、跨日领取、星级隔离与配色兑换。

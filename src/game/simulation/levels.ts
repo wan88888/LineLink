@@ -1,136 +1,98 @@
-import {
-  SHAPE_BOWTIE,
-  SHAPE_ENVELOPE,
-  SHAPE_HEPTAGON,
-  SHAPE_HEXAGON,
-  SHAPE_HEX_FAN,
-  SHAPE_HOUSE,
-  SHAPE_HOUSE_X,
-  SHAPE_OCTAGON,
-  SHAPE_PENTAGON,
-  SHAPE_PENTAGRAM,
-  SHAPE_RECTANGLE_DIAG,
-  SHAPE_SQUARE,
-  SHAPE_SQUARE_DIAG,
-  SHAPE_SQUARE_X,
-  SHAPE_STAR5,
-  SHAPE_TRIANGLE,
-  type ShapeTemplate,
-} from './shapes';
+import type { ShapeTemplate } from './shapes';
 import type { GridPoint, LevelDefinition } from './types';
 
-interface TierConfig {
-  tierName: string;
-  tierRank: number;
-  shapes: ShapeTemplate[];
-}
-
-const TIERS: TierConfig[] = [
-  {
-    tierName: '新手',
-    tierRank: 1,
-    shapes: [SHAPE_TRIANGLE, SHAPE_SQUARE, SHAPE_PENTAGON, SHAPE_SQUARE_DIAG],
-  },
-  {
-    tierName: '进阶',
-    tierRank: 2,
-    shapes: [SHAPE_PENTAGRAM, SHAPE_BOWTIE, SHAPE_HOUSE, SHAPE_RECTANGLE_DIAG],
-  },
-  {
-    tierName: '挑战',
-    tierRank: 3,
-    shapes: [SHAPE_SQUARE_X, SHAPE_HEXAGON, SHAPE_HOUSE_X, SHAPE_HEX_FAN],
-  },
-  {
-    tierName: '大师',
-    tierRank: 4,
-    shapes: [SHAPE_ENVELOPE, SHAPE_HEPTAGON, SHAPE_OCTAGON, SHAPE_STAR5],
-  },
-];
-
-const LEVELS_PER_TIER = 12;
-const SHAPES_PER_TIER = 4;
-
-type Variant = 0 | 1 | 2;
-
-function transformPoint(point: GridPoint, rows: number, cols: number, variant: Variant): GridPoint {
-  switch (variant) {
-    case 1:
-      return { row: point.row, col: cols - 1 - point.col };
-    case 2:
-      return { row: rows - 1 - point.row, col: point.col };
-    default:
-      return { row: point.row, col: point.col };
-  }
-}
-
-/** Returns true if the (connected) graph has an Euler path or circuit. */
+/** Validate a simple connected graph before shipping it as a puzzle. */
 export function hasEulerPath(shape: ShapeTemplate): boolean {
-  const degrees = new Array(shape.nodes.length).fill(0);
-  shape.edges.forEach(([a, b]) => {
-    degrees[a] += 1;
-    degrees[b] += 1;
-  });
-  const oddCount = degrees.filter((d) => d % 2 === 1).length;
-  if (oddCount !== 0 && oddCount !== 2) return false;
-
-  // connectivity over nodes that have at least one edge
-  const adj = new Map<number, number[]>();
-  shape.edges.forEach(([a, b]) => {
-    if (!adj.has(a)) adj.set(a, []);
-    if (!adj.has(b)) adj.set(b, []);
-    adj.get(a)!.push(b);
-    adj.get(b)!.push(a);
-  });
-  if (adj.size === 0) return false;
-  const start = adj.keys().next().value as number;
-  const seen = new Set<number>([start]);
-  const stack = [start];
-  while (stack.length) {
-    const u = stack.pop()!;
-    (adj.get(u) || []).forEach((v) => {
-      if (!seen.has(v)) {
-        seen.add(v);
-        stack.push(v);
-      }
-    });
+  if (!shape.edges.length || !shape.nodes.length) return false;
+  const adjacency = shape.nodes.map(() => new Set<number>());
+  for (const [a, b] of shape.edges) {
+    if (!Number.isInteger(a) || !Number.isInteger(b) || !adjacency[a] || !adjacency[b] || a === b || adjacency[a].has(b)) return false;
+    adjacency[a].add(b);
+    adjacency[b].add(a);
   }
-  return seen.size === adj.size;
+  const odd = adjacency.filter(n => n.size % 2).length;
+  if (odd !== 0 && odd !== 2) return false;
+  const seen = new Set<number>();
+  const visit = (node: number) => {
+    if (seen.has(node)) return;
+    seen.add(node);
+    adjacency[node].forEach(visit);
+  };
+  visit(0);
+  return seen.size === shape.nodes.length;
 }
 
-function buildLevel(id: number, tier: TierConfig, localIndex: number): LevelDefinition {
-  const shapeIndex = localIndex % SHAPES_PER_TIER;
-  const variant = Math.floor(localIndex / SHAPES_PER_TIER) as Variant;
-  const shape = tier.shapes[shapeIndex];
-  const nodes = shape.nodes.map((n) => transformPoint(n, shape.rows, shape.cols, variant));
-  return {
-    id,
-    tierName: tier.tierName,
-    tierRank: tier.tierRank,
-    rows: shape.rows,
-    cols: shape.cols,
-    nodes,
-    edges: shape.edges.map(([a, b]) => [nodes[a], nodes[b]]),
-  };
+export function difficultyScore(level: LevelDefinition): number {
+  const degree = level.nodes.map(n => level.edges.filter(e => e.includes(n)).length);
+  return degree.reduce((sum, d) => sum + Math.max(0, d - 2) * 10, 0)
+    + level.edges.length + (degree.some(d => d % 2) ? 4 : 0);
+}
+
+// Normalize rotations and reflections, so mirrored puzzles cannot fill the catalog.
+function signature(size: number, edges: Array<[number, number]>): string {
+  const variants: string[] = [];
+  for (let offset = 0; offset < size; offset++) {
+    for (const direction of [1, -1]) {
+      variants.push(edges.map(([a, b]) => [a, b]
+        .map(i => (i * direction + offset + size) % size).sort((x, y) => x - y).join('-')).sort().join('|'));
+    }
+  }
+  return `${size}:${variants.sort()[0]}`;
 }
 
 export function createLevelCatalog(): LevelDefinition[] {
-  // fail-fast: any shape that can't be solved is a bug.
-  TIERS.forEach((tier) =>
-    tier.shapes.forEach((s) => {
-      if (!hasEulerPath(s)) {
-        throw new Error(`Shape "${s.name}" has no Euler path — remove or fix its edges.`);
+  const candidates: LevelDefinition[] = [];
+  const seen = new Set<string>();
+  let seed = 20261010;
+  const random = (n: number) => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return Math.floor(seed / 0x100000000 * n);
+  };
+  for (let attempt = 0; attempt < 4000; attempt++) {
+    const size = attempt < 3 ? attempt + 3 : 5 + random(6);
+    const nodes: GridPoint[] = Array.from({ length: size }, (_, i) => ({
+      row: 2 + 2 * Math.sin(-Math.PI / 2 + i * Math.PI * 2 / size),
+      col: 2 + 2 * Math.cos(-Math.PI / 2 + i * Math.PI * 2 / size),
+    }));
+    const edges: Array<[number, number]> = Array.from({ length: size }, (_, i) => [i, (i + 1) % size]);
+    const edgeSet = new Set(edges.map(([a, b]) => [a, b].sort((x, y) => x - y).join('-')));
+    const cycles = attempt < 3 ? 0 : 1 + random(4);
+    for (let c = 0; c < cycles; c++) {
+      // Adding an unused triangle preserves even degree at every vertex.
+      for (let retry = 0; retry < 40; retry++) {
+        const [a, b, d] = [random(size), random(size), random(size)];
+        if (new Set([a, b, d]).size !== 3) continue;
+        const triangle: Array<[number, number]> = [[a, b], [b, d], [d, a]];
+        if (triangle.some(([x, y]) => edgeSet.has([x, y].sort((u, v) => u - v).join('-')))) continue;
+        triangle.forEach(e => { edges.push(e); edgeSet.add([...e].sort((x, y) => x - y).join('-')); });
+        break;
       }
-    }),
-  );
-
-  const levels: LevelDefinition[] = [];
-  let id = 1;
-  TIERS.forEach((tier) => {
-    for (let i = 0; i < LEVELS_PER_TIER; i += 1) {
-      levels.push(buildLevel(id, tier, i));
-      id += 1;
     }
-  });
-  return levels;
+    if (attempt >= 3 && edges.length === size) continue;
+    if (attempt >= 3 && random(2) === 0) edges.splice(random(edges.length), 1);
+    const shape = { name: 'generated', rows: 5, cols: 5, nodes, edges };
+    if (!hasEulerPath(shape)) continue;
+    const key = signature(size, edges);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ id: 0, tierName: '', tierRank: 0, rows: 5, cols: 5, nodes, edges: edges.map(([a, b]) => [nodes[a], nodes[b]]) });
+  }
+  candidates.sort((a, b) => difficultyScore(a) - difficultyScore(b));
+  if (candidates.length < 48) throw new Error('Not enough unique puzzles');
+  // Spread the catalog over the complexity range, keeping three gentle tutorials.
+  const selected = candidates.slice(0, 3);
+  let cursor = 3;
+  const low = difficultyScore(candidates[3]);
+  const high = difficultyScore(candidates.at(-1)!);
+  for (let i = 0; i < 45; i++) {
+    const target = low + (high - low) * Math.pow(i / 44, 1.4);
+    const lastAllowed = candidates.length - (45 - i);
+    let best = cursor;
+    for (let j = cursor + 1; j <= lastAllowed; j++) {
+      if (Math.abs(difficultyScore(candidates[j]) - target) < Math.abs(difficultyScore(candidates[best]) - target)) best = j;
+    }
+    cursor = best;
+    selected.push(candidates[cursor++]);
+  }
+  return selected.map((level, i) => ({ ...level, id: i + 1, tierRank: 1 + Math.floor(i / 12), tierName: ['新手', '进阶', '挑战', '大师'][Math.floor(i / 12)] }));
 }

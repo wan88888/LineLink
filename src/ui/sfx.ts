@@ -3,6 +3,16 @@
 let ctx: AudioContext | null = null;
 let enabled = true;
 
+try { enabled = localStorage.getItem('linelink-sound') !== 'off'; } catch { /* Use default without storage. */ }
+
+export function soundEnabled(): boolean { return enabled; }
+
+export function setSoundEnabled(value: boolean): void {
+  enabled = value;
+  if (!value) void ctx?.suspend();
+  try { localStorage.setItem('linelink-sound', value ? 'on' : 'off'); } catch { /* Session setting still works. */ }
+}
+
 function getCtx(): AudioContext | null {
   if (!enabled) return null;
   if (ctx) return ctx;
